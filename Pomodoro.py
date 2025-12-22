@@ -10,18 +10,21 @@ Scriptor
 
 import tkinter as tk
 import winsound
+import json
+import os
+
+# ---------- Файл настроек ----------
+SETTINGS_FILE = "settings.json"
 
 # ---------- Цвета ----------
 BG_COLOR = "#d6e86c"
-
 WORK_BG = "#f4a742"
 BREAK_BG = "#6ec6ff"
 
 WORK_BTN = "#ff8c00"
 BREAK_BTN = "#00a2ff"
-
-STOP_BTN = "#8b5a2b"    # коричневый
-EXIT_BTN = "#cc0000"    # красный
+STOP_BTN = "#8b5a2b"
+EXIT_BTN = "#cc0000"
 
 TEXT_COLOR = "black"
 
@@ -31,11 +34,30 @@ running = False
 timer_id = None
 time_left = 0
 
+# ---------- Настройки ----------
+def load_settings():
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("work", 25), data.get("break", 5)
+        except:
+            pass
+    return 25, 5
+
+def save_settings():
+    data = {
+        "work": int(work_entry.get()),
+        "break": int(break_entry.get())
+    }
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
 # ---------- Звук ----------
 def play_sound():
     winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
 
-# ---------- Логика ----------
+# ---------- Таймер ----------
 def minutes_to_seconds(entry):
     try:
         return int(entry.get()) * 60
@@ -63,8 +85,10 @@ def tick():
         stop_timer()
         play_sound()
 
+# ---------- Управление ----------
 def start_work():
     global mode, running, time_left
+    save_settings()
     stop_timer()
     mode = "work"
     time_left = minutes_to_seconds(work_entry)
@@ -74,6 +98,7 @@ def start_work():
 
 def start_break():
     global mode, running, time_left
+    save_settings()
     stop_timer()
     mode = "break"
     time_left = minutes_to_seconds(break_entry)
@@ -85,6 +110,7 @@ def stop_only():
     stop_timer()
 
 def exit_app():
+    save_settings()
     stop_timer()
     root.destroy()
 
@@ -94,6 +120,8 @@ root.title("Таймер помодоро – эффективность в ра
 root.geometry("420x360")
 root.configure(bg=BG_COLOR)
 root.resizable(False, False)
+
+work_default, break_default = load_settings()
 
 title = tk.Label(
     root,
@@ -106,7 +134,7 @@ title.pack(pady=10)
 
 timer_label = tk.Label(
     root,
-    text="25:00",
+    text=f"{work_default:02}:00",
     font=("Arial", 40, "bold"),
     bg=BG_COLOR,
     fg=TEXT_COLOR
@@ -118,49 +146,27 @@ frame.pack()
 
 tk.Label(frame, text="Работа (мин)", bg=WORK_BG).grid(row=0, column=0, padx=10)
 work_entry = tk.Entry(frame, width=5, justify="center", fg=TEXT_COLOR)
-work_entry.insert(0, "25")
+work_entry.insert(0, str(work_default))
 work_entry.grid(row=1, column=0)
 
-tk.Label(frame, text="Перерыв (мин)", bg=BREAK_BG).grid(row=0, column=1, padx=10)
+tk.Label(frame, text="Отдых (мин)", bg=BREAK_BG).grid(row=0, column=1, padx=10)
 break_entry = tk.Entry(frame, width=5, justify="center", fg=TEXT_COLOR)
-break_entry.insert(0, "5")
+break_entry.insert(0, str(break_default))
 break_entry.grid(row=1, column=1)
 
 btn_frame = tk.Frame(root, bg=BG_COLOR)
 btn_frame.pack(pady=25)
 
-tk.Button(
-    btn_frame,
-    text="Работа",
-    width=12,
-    bg=WORK_BTN,
-    command=start_work
-).grid(row=0, column=0, padx=5)
+tk.Button(btn_frame, text="Работа", width=12, bg=WORK_BTN, command=start_work)\
+    .grid(row=0, column=0, padx=5)
 
-tk.Button(
-    btn_frame,
-    text="Перерыв",
-    width=12,
-    bg=BREAK_BTN,
-    command=start_break
-).grid(row=0, column=1, padx=5)
+tk.Button(btn_frame, text="Перерыв", width=12, bg=BREAK_BTN, command=start_break)\
+    .grid(row=0, column=1, padx=5)
 
-tk.Button(
-    btn_frame,
-    text="Останов",
-    width=12,
-    bg=STOP_BTN,
-    fg="white",
-    command=stop_only
-).grid(row=1, column=0, padx=5, pady=10)
+tk.Button(btn_frame, text="Останов", width=12, bg=STOP_BTN, fg="white", command=stop_only)\
+    .grid(row=1, column=0, padx=5, pady=10)
 
-tk.Button(
-    btn_frame,
-    text="Выход",
-    width=12,
-    bg=EXIT_BTN,
-    fg="white",
-    command=exit_app
-).grid(row=1, column=1, padx=5, pady=10)
+tk.Button(btn_frame, text="Выход", width=12, bg=EXIT_BTN, fg="white", command=exit_app)\
+    .grid(row=1, column=1, padx=5, pady=10)
 
 root.mainloop()
