@@ -98,19 +98,24 @@ def update_timer_label():
     label_timer.config(text=f"{m:02d}:{s:02d}")
 
 # ================== РЕЖИМЫ ==================
-def start_work():
+def start_mode(mode):
     global current_mode
-    pause_timer()
-    current_mode = "work"
-    reset_to_default("work")
+
+    if current_mode != mode:
+        pause_timer()
+        current_mode = mode
+        reset_to_default(mode)
+    else:
+        if remaining_seconds <= 0:
+            reset_to_default(mode)
+
     start_timer()
 
+def start_work():
+    start_mode("work")
+
 def start_break():
-    global current_mode
-    pause_timer()
-    current_mode = "break"
-    reset_to_default("break")
-    start_timer()
+    start_mode("break")
 
 # ================== ЦВЕТА КНОПОК ==================
 def update_mode_buttons():
