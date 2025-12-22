@@ -34,6 +34,7 @@ TEXT_COLOR = "black"
 
 # ---------- Состояние ----------
 mode = None
+paused_mode = None
 running = False
 timer_id = None
 time_left = 0
@@ -51,12 +52,11 @@ def load_settings():
     return 25, 5
 
 def save_settings():
-    data = {
-        "work": int(work_entry.get()),
-        "break": int(break_entry.get())
-    }
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f)
+        json.dump({
+            "work": int(work_entry.get()),
+            "break": int(break_entry.get())
+        }, f)
 
 # ---------- Звук ----------
 def play_sound():
@@ -75,8 +75,9 @@ def update_display():
     timer_label.config(text=f"{m:02}:{s:02}")
 
 def stop_timer():
-    global running, timer_id
+    global running, timer_id, paused_mode
     running = False
+    paused_mode = mode
     if timer_id:
         root.after_cancel(timer_id)
 
@@ -95,8 +96,13 @@ def start_work():
     global mode, running, time_left
     save_settings()
     stop_timer()
+
+    if paused_mode == "work" and time_left > 0:
+        pass  # продолжаем
+    else:
+        time_left = minutes_to_seconds(work_entry)
+
     mode = "work"
-    time_left = minutes_to_seconds(work_entry)
     running = True
     update_display()
     tick()
@@ -105,8 +111,13 @@ def start_break():
     global mode, running, time_left
     save_settings()
     stop_timer()
+
+    if paused_mode == "break" and time_left > 0:
+        pass
+    else:
+        time_left = minutes_to_seconds(break_entry)
+
     mode = "break"
-    time_left = minutes_to_seconds(break_entry)
     running = True
     update_display()
     tick()
@@ -123,9 +134,9 @@ def exit_app(icon=None, item=None):
 
 # ---------- Трей ----------
 def create_tray_image():
-    img = Image.new("RGB", (64, 64), "#d6e86c")
+    img = Image.new("RGB", (64, 64), BG_COLOR)
     d = ImageDraw.Draw(img)
-    d.rectangle((16, 16, 48, 48), fill="#ff8c00")
+    d.rectangle((18, 18, 46, 46), fill=WORK_BTN)
     return img
 
 def show_window(icon=None, item=None):
@@ -135,10 +146,14 @@ def hide_window():
     root.withdraw()
     threading.Thread(target=run_tray, daemon=True).start()
 
+def on_tray_double_click(icon, button, time):
+    show_window()
+
 def run_tray():
     global tray_icon
     if tray_icon:
         return
+
     tray_icon = Icon(
         "Pomodoro",
         create_tray_image(),
@@ -148,6 +163,7 @@ def run_tray():
             MenuItem("Выход", exit_app)
         )
     )
+    tray_icon.on_double_click = on_tray_double_click
     tray_icon.run()
 
 # ---------- UI ----------

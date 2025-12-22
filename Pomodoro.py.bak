@@ -12,6 +12,10 @@ import tkinter as tk
 import winsound
 import json
 import os
+import threading
+
+from pystray import Icon, Menu, MenuItem
+from PIL import Image, ImageDraw
 
 # ---------- Файл настроек ----------
 SETTINGS_FILE = "settings.json"
@@ -33,6 +37,7 @@ mode = None
 running = False
 timer_id = None
 time_left = 0
+tray_icon = None
 
 # ---------- Настройки ----------
 def load_settings():
@@ -109,17 +114,50 @@ def start_break():
 def stop_only():
     stop_timer()
 
-def exit_app():
+def exit_app(icon=None, item=None):
     save_settings()
     stop_timer()
-    root.destroy()
+    if tray_icon:
+        tray_icon.stop()
+    root.after(0, root.destroy)
+
+# ---------- Трей ----------
+def create_tray_image():
+    img = Image.new("RGB", (64, 64), "#d6e86c")
+    d = ImageDraw.Draw(img)
+    d.rectangle((16, 16, 48, 48), fill="#ff8c00")
+    return img
+
+def show_window(icon=None, item=None):
+    root.after(0, root.deiconify)
+
+def hide_window():
+    root.withdraw()
+    threading.Thread(target=run_tray, daemon=True).start()
+
+def run_tray():
+    global tray_icon
+    if tray_icon:
+        return
+    tray_icon = Icon(
+        "Pomodoro",
+        create_tray_image(),
+        "Таймер помодоро",
+        menu=Menu(
+            MenuItem("Открыть", show_window),
+            MenuItem("Выход", exit_app)
+        )
+    )
+    tray_icon.run()
 
 # ---------- UI ----------
 root = tk.Tk()
 root.title("Таймер помодоро – эффективность в работе")
-root.geometry("420x360")
+root.geometry("420x380")
 root.configure(bg=BG_COLOR)
 root.resizable(False, False)
+
+root.protocol("WM_DELETE_WINDOW", hide_window)
 
 work_default, break_default = load_settings()
 
