@@ -15,265 +15,230 @@ pomodoro_circle.py
 """
 
 import tkinter as tk
-import json
-import os
-import math
-import time
+from tkinter import ttk
+import math, time, json, os, threading
 from PIL import Image, ImageDraw, ImageFont
 import pystray
 
-# ================== НАСТРОЙКИ ==================
+# ================== КОНСТАНТЫ ==================
+APP_SIZE = 480
+RING_WIDTH = 24
+CONFIG_FILE = "pomodoro_config.json"
 
-SIZE = 520
-CENTER = SIZE // 2
-RADIUS = 200
+COLOR_IDLE = "#e6e6e6"
+COLOR_WORK = "#ffd9b3"
+COLOR_BREAK = "#d6ecff"
 
-SETTINGS_FILE = "settings.json"
+RING_IDLE = "#b0b0b0"
+RING_WORK = "#ff9900"
+RING_BREAK = "#66b3ff"
 
-COLOR_IDLE = "#dddddd"
-COLOR_WORK = "#ffd7b0"      # светло-оранжевый
-COLOR_BREAK = "#cfefff"     # светло-голубой
-
-BTN_WORK_ACTIVE = "#ff9800"
-BTN_WORK_IDLE = "#ffd7b0"
-BTN_BREAK_ACTIVE = "#4fc3f7"
-BTN_BREAK_IDLE = "#cfefff"
-BTN_STOP = "#8b5a2b"
-BTN_EXIT = "#c62828"
-
-TEXT_COLOR = "black"
-
-# ================== ЗАГРУЗКА НАСТРОЕК ==================
-
-def load_settings():
-    if os.path.exists(SETTINGS_FILE):
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"work": 25, "break": 5}
-
-def save_settings():
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(settings, f)
-
-settings = load_settings()
+START_HOUR = 8
+END_HOUR = 20
 
 # ================== СОСТОЯНИЕ ==================
-
-mode = None
-running = False
-remaining_seconds = 0
-timer_id = None
+mode = "idle"
+remaining = 0
+timer_after = None
 tray_icon = None
+segments = []
+current_segment_start = None
 
-# ================== ОСНОВНОЕ ОКНО ==================
+work_minutes = 30
+break_minutes = 10
 
+# ================== ЗАГРУЗКА ==================
+if os.path.exists(CONFIG_FILE):
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+            work_minutes = int(d.get("work", work_minutes))
+            break_minutes = int(d.get("break", break_minutes))
+    except:
+        pass
+
+# ================== TK ==================
 root = tk.Tk()
-root.overrideredirect(True)
-root.geometry(f"{SIZE}x{SIZE}+300+150")
+root.title("Помодоро")
+root.geometry(f"{APP_SIZE}x{APP_SIZE}")
 root.configure(bg=COLOR_IDLE)
 
-canvas = tk.Canvas(root, width=SIZE, height=SIZE, bg=COLOR_IDLE, highlightthickness=0)
-canvas.pack()
+canvas = tk.Canvas(root, bg=COLOR_IDLE, highlightthickness=0)
+canvas.pack(fill="both", expand=True)
 
-# ================== ПЕРЕТАСКИВАНИЕ ==================
+# ================== ПЕРЕТАСКИВАНИЕ (ТОЛЬКО ФОН) ==================
+_drag = {"x": 0, "y": 0}
 
 def start_move(e):
-    root.x = e.x
-    root.y = e.y
+    _drag["x"] = e.x_root
+    _drag["y"] = e.y_root
 
 def do_move(e):
-    x = root.winfo_x() + e.x - root.x
-    y = root.winfo_y() + e.y - root.y
+    dx = e.x_root - _drag["x"]
+    dy = e.y_root - _drag["y"]
+    x = root.winfo_x() + dx
+    y = root.winfo_y() + dy
     root.geometry(f"+{x}+{y}")
+    _drag["x"] = e.x_root
+    _drag["y"] = e.y_root
 
-canvas.bind("<ButtonPress-1>", start_move)
+canvas.bind("<Button-1>", start_move)
 canvas.bind("<B1-Motion>", do_move)
 
-# ================== ИНФОРМАЦИОННОЕ КОЛЬЦО ==================
+# ================== ФОН ==================
+def set_bg():
+    bg = COLOR_IDLE if mode=="idle" else COLOR_WORK if mode=="work" else COLOR_BREAK
+    root.configure(bg=bg)
+    canvas.configure(bg=bg)
 
-def draw_time_ring():
+# ================== КОЛЬЦО ==================
+def time_to_angle(ts):
+    lt = time.localtime(ts)
+    h = lt.tm_hour + lt.tm_min/60
+    return 90 - ((h-START_HOUR)/(END_HOUR-START_HOUR))*360
+
+def draw_ring():
     canvas.delete("ring")
+    cx = cy = APP_SIZE//2
+    r = APP_SIZE//2 - 40
 
-    canvas.create_oval(
-        CENTER - RADIUS, CENTER - RADIUS,
-        CENTER + RADIUS, CENTER + RADIUS,
-        outline="white", width=18, tags="ring"
-    )
+    canvas.create_oval(cx-r, cy-r, cx+r, cy+r,
+                       outline="white", width=RING_WIDTH, tags="ring")
 
-    start_angle = -90
-    for hour in range(8, 20):
-        angle = math.radians(start_angle + (hour - 8) * 30)
-        x = CENTER + math.cos(angle) * (RADIUS + 22)
-        y = CENTER + math.sin(angle) * (RADIUS + 22)
-        canvas.create_text(x, y, text=str(hour), fill="white", font=("Arial", 12), tags="ring")
+    for s, e, m in segments:
+        if e <= s:
+            continue
+        color = RING_WORK if m=="work" else RING_BREAK
+        canvas.create_arc(cx-r, cy-r, cx+r, cy+r,
+                          start=time_to_angle(s),
+                          extent=time_to_angle(e)-time_to_angle(s),
+                          style="arc", width=RING_WIDTH,
+                          outline=color, tags="ring")
 
-draw_time_ring()
+    for h in range(START_HOUR, END_HOUR):
+        a = math.radians(90-(h-START_HOUR)*360/(END_HOUR-START_HOUR))
+        tx = cx + (r+18)*math.cos(a)
+        ty = cy - (r+18)*math.sin(a)
+        canvas.create_text(tx, ty, text=str(h),
+                           fill="black", font=("Arial", 10), tags="ring")
 
 # ================== ТАЙМЕР ==================
+timer_text = canvas.create_text(APP_SIZE//2, APP_SIZE//2,
+                                text="00:00",
+                                font=("Arial", 60, "bold"))
 
-timer_text = canvas.create_text(
-    CENTER, CENTER,
-    text="00:00",
-    fill=TEXT_COLOR,
-    font=("Arial", 42, "bold")
-)
-
-def update_timer_label():
-    m = remaining_seconds // 60
-    s = remaining_seconds % 60
-    canvas.itemconfig(timer_text, text=f"{m:02}:{s:02}")
+def format_time(s): return f"{s//60:02d}:{s%60:02d}"
 
 def tick():
-    global remaining_seconds, timer_id
-    if running and remaining_seconds > 0:
-        remaining_seconds -= 1
-        update_timer_label()
+    global remaining, timer_after
+    if remaining > 0:
+        remaining -= 1
+        canvas.itemconfig(timer_text, text=format_time(remaining))
         update_tray_icon()
-        timer_id = root.after(1000, tick)
+        timer_after = root.after(1000, tick)
     else:
         stop_timer()
 
-# ================== УПРАВЛЕНИЕ РЕЖИМАМИ ==================
-
-def start_mode(new_mode):
-    global mode, running, remaining_seconds
-
-    stop_timer(cancel_only=True)
-
-    if mode != new_mode:
-        if new_mode == "work":
-            remaining_seconds = settings["work"] * 60
-        else:
-            remaining_seconds = settings["break"] * 60
-
-    mode = new_mode
-    running = True
-    update_ui()
+# ================== РЕЖИМЫ ==================
+def start_mode(m, minutes):
+    global mode, remaining, current_segment_start
+    stop_timer()
+    mode = m
+    remaining = minutes*60
+    current_segment_start = time.time()
+    set_bg()
+    draw_ring()
+    canvas.itemconfig(timer_text, text=format_time(remaining))
     tick()
 
-def stop_timer(cancel_only=False):
-    global running, timer_id
-    running = False
-    if timer_id:
-        root.after_cancel(timer_id)
-        timer_id = None
-    if not cancel_only:
-        update_ui()
-
-# ================== UI ==================
-
-def update_ui():
-    if mode == "work" and running:
-        root.configure(bg=COLOR_WORK)
-        canvas.configure(bg=COLOR_WORK)
-        btn_work.config(bg=BTN_WORK_ACTIVE)
-        btn_break.config(bg=BTN_BREAK_IDLE)
-    elif mode == "break" and running:
-        root.configure(bg=COLOR_BREAK)
-        canvas.configure(bg=COLOR_BREAK)
-        btn_work.config(bg=BTN_WORK_IDLE)
-        btn_break.config(bg=BTN_BREAK_ACTIVE)
-    else:
-        root.configure(bg=COLOR_IDLE)
-        canvas.configure(bg=COLOR_IDLE)
-        btn_work.config(bg=BTN_WORK_IDLE)
-        btn_break.config(bg=BTN_BREAK_IDLE)
-
-# ================== КНОПКИ ==================
-
-btn_work = tk.Button(root, text="Работа", command=lambda: start_mode("work"), bg=BTN_WORK_IDLE)
-btn_break = tk.Button(root, text="Перерыв", command=lambda: start_mode("break"), bg=BTN_BREAK_IDLE)
-btn_stop = tk.Button(root, text="Останов", command=stop_timer, bg=BTN_STOP, fg="white")
-btn_exit = tk.Button(root, text="Выход", command=lambda: exit_app(), bg=BTN_EXIT, fg="white")
-
-canvas.create_window(CENTER - 110, SIZE - 45, window=btn_work)
-canvas.create_window(CENTER, SIZE - 45, window=btn_break)
-canvas.create_window(CENTER + 110, SIZE - 45, window=btn_stop)
-canvas.create_window(CENTER, SIZE - 15, window=btn_exit)
-
-# ================== НАСТРОЙКИ МИНУТ ==================
-
-def open_settings(kind):
-    win = tk.Toplevel(root)
-    win.title("Настройка")
-    win.geometry("200x120")
-    tk.Label(win, text=f"{kind.capitalize()} (мин):").pack(pady=10)
-    entry = tk.Entry(win)
-    entry.insert(0, settings[kind])
-    entry.pack()
-
-    def save():
-        settings[kind] = int(entry.get())
-        save_settings()
-        win.destroy()
-
-    tk.Button(win, text="OK", command=save).pack(pady=10)
-
-btn_set_work = tk.Button(root, text="⚙", command=lambda: open_settings("work"))
-btn_set_break = tk.Button(root, text="⚙", command=lambda: open_settings("break"))
-
-canvas.create_window(CENTER - 180, CENTER + 80, window=btn_set_work)
-canvas.create_window(CENTER + 180, CENTER + 80, window=btn_set_break)
+def stop_timer():
+    global mode, current_segment_start
+    if timer_after:
+        root.after_cancel(timer_after)
+    if current_segment_start:
+        segments.append((current_segment_start, time.time(), mode))
+        current_segment_start = None
+    mode = "idle"
+    set_bg()
+    draw_ring()
+    update_tray_icon()
 
 # ================== TRAY ==================
-
-def create_tray_image():
-    img = Image.new("RGB", (64, 64), COLOR_IDLE)
-    draw = ImageDraw.Draw(img)
-
-    if mode == "work":
-        img.paste(Image.new("RGB", (64, 64), BTN_WORK_ACTIVE))
-    elif mode == "break":
-        img.paste(Image.new("RGB", (64, 64), BTN_BREAK_ACTIVE))
-
-    minutes = remaining_seconds // 60
-
-    try:
-        font = ImageFont.truetype("arialbd.ttf", 28)
-    except:
-        font = ImageFont.load_default()
-
-    text = str(minutes)
-    w, h = draw.textsize(text, font=font)
-    draw.text(
-        ((64 - w) / 2, (64 - h) / 2),
-        text,
-        fill="black",
-        font=font
-    )
+def tray_image(text, bg):
+    img = Image.new("RGBA", (64,64), bg)
+    d = ImageDraw.Draw(img)
+    size = 36
+    font = ImageFont.truetype("arial.ttf", size) if os.path.exists("arial.ttf") else ImageFont.load_default()
+    w, h = d.textsize(text, font)
+    d.text(((64-w)//2,(64-h)//2), text, fill="black", font=font)
     return img
 
 def update_tray_icon():
     if tray_icon:
-        tray_icon.icon = create_tray_image()
+        bg = COLOR_IDLE if mode=="idle" else COLOR_WORK if mode=="work" else COLOR_BREAK
+        txt = str(remaining//60) if remaining else ""
+        tray_icon.icon = tray_image(txt, bg)
 
-def show_window(icon=None, item=None):
-    root.after(0, root.deiconify)
+def restore_window(icon=None, item=None):
+    root.after(0, lambda: (root.deiconify(), root.lift(), root.focus_force()))
 
-def hide_window():
-    root.withdraw()
-
-def exit_app(icon=None, item=None):
+def quit_app(icon=None, item=None):
+    save_config()
     if tray_icon:
         tray_icon.stop()
-    root.destroy()
-
-menu = pystray.Menu(
-    pystray.MenuItem("Открыть", show_window),
-    pystray.MenuItem("Выход", exit_app)
-)
+    root.after(0, root.destroy)
 
 def setup_tray():
     global tray_icon
-    tray_icon = pystray.Icon("Pomodoro", create_tray_image(), "Pomodoro", menu)
-    tray_icon.run_detached()
+    tray_icon = pystray.Icon(
+        "pomodoro",
+        tray_image("", COLOR_IDLE),
+        "Помодоро",
+        pystray.Menu(
+            pystray.MenuItem("Открыть", restore_window),
+            pystray.MenuItem("Выход", quit_app)
+        )
+    )
+    tray_icon.visible = True
+    threading.Thread(target=tray_icon.run, daemon=True).start()
 
+def minimize_to_tray():
+    root.withdraw()
+
+# ================== СОХРАНЕНИЕ ==================
+def save_config():
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump({"work": work_entry.get(),
+                   "break": break_entry.get()}, f)
+
+# ================== UI ВНУТРИ КОЛЬЦА ==================
+work_label = ttk.Label(root, text="Работа (мин)")
+work_entry = ttk.Entry(root, width=5)
+work_entry.insert(0, str(work_minutes))
+
+break_label = ttk.Label(root, text="Перерыв (мин)")
+break_entry = ttk.Entry(root, width=5)
+break_entry.insert(0, str(break_minutes))
+
+work_label.place(relx=0.4, rely=0.35, anchor="e")
+work_entry.place(relx=0.42, rely=0.35, anchor="w")
+break_label.place(relx=0.4, rely=0.42, anchor="e")
+break_entry.place(relx=0.42, rely=0.42, anchor="w")
+
+btn_work = ttk.Button(root, text="Работа", command=lambda: start_mode("work", int(work_entry.get())))
+btn_break = ttk.Button(root, text="Перерыв", command=lambda: start_mode("break", int(break_entry.get())))
+btn_stop = ttk.Button(root, text="Останов", command=stop_timer)
+btn_exit = ttk.Button(root, text="Выход", command=quit_app)
+
+btn_work.place(relx=0.3, rely=0.7, anchor="center")
+btn_stop.place(relx=0.5, rely=0.7, anchor="center")
+btn_break.place(relx=0.7, rely=0.7, anchor="center")
+btn_exit.place(relx=0.5, rely=0.8, anchor="center")
+
+root.protocol("WM_DELETE_WINDOW", minimize_to_tray)
+
+# ================== СТАРТ ==================
+set_bg()
+root.after(100, draw_ring)
 setup_tray()
-
-# ================== КРЕСТИК ==================
-
-close_btn = tk.Button(root, text="✕", command=hide_window, bg="#bbbbbb")
-canvas.create_window(SIZE - 15, 15, window=close_btn)
-
-update_timer_label()
 root.mainloop()
