@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Mon Dec 22 11:38:43 2025
+Created on Mon Dec 24 11:38:43 2025
 Pomodoro.py
 С использованием ChatGPT
 D:\ИИ\Нейросети\Программирование с нейросетью\Помодоро с нейросетью
@@ -9,7 +9,6 @@ Scriptor
 """
 
 import tkinter as tk
-import threading
 import time
 import json
 import os
@@ -39,9 +38,10 @@ COLOR_EXIT = "#e53935"
 current_mode = None        # "work" / "break"
 timer_running = False
 remaining_seconds = 0
+after_id = None
 tray_icon = None
 
-# ================== СОХРАНЕНИЕ ==================
+# ================== НАСТРОЙКИ ==================
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
@@ -64,25 +64,36 @@ def start_timer():
         return
     timer_running = True
     update_mode_buttons()
-    threading.Thread(target=timer_loop, daemon=True).start()
+    schedule_tick()
 
-def pause_timer():
-    global timer_running
-    timer_running = False
-    update_mode_buttons()
+def schedule_tick():
+    global after_id
+    after_id = root.after(1000, tick)
 
-def timer_loop():
-    global remaining_seconds, timer_running
-    while timer_running and remaining_seconds > 0:
-        time.sleep(1)
+def tick():
+    global remaining_seconds, timer_running, after_id
+
+    if not timer_running:
+        return
+
+    if remaining_seconds > 0:
         remaining_seconds -= 1
         update_timer_label()
-
-    if remaining_seconds == 0:
+        schedule_tick()
+    else:
         timer_running = False
+        after_id = None
         winsound.PlaySound("SystemHand", winsound.SND_ALIAS)
         reset_to_default(current_mode)
         update_mode_buttons()
+
+def pause_timer():
+    global timer_running, after_id
+    timer_running = False
+    if after_id:
+        root.after_cancel(after_id)
+        after_id = None
+    update_mode_buttons()
 
 def reset_to_default(mode):
     global remaining_seconds
@@ -105,11 +116,10 @@ def start_mode(mode):
         pause_timer()
         current_mode = mode
         reset_to_default(mode)
+        start_timer()
     else:
-        if remaining_seconds <= 0:
-            reset_to_default(mode)
-
-    start_timer()
+        if not timer_running:
+            start_timer()
 
 def start_work():
     start_mode("work")
@@ -117,7 +127,7 @@ def start_work():
 def start_break():
     start_mode("break")
 
-# ================== ЦВЕТА КНОПОК ==================
+# ================== ЦВЕТА ==================
 def update_mode_buttons():
     if current_mode == "work":
         btn_work.config(bg=COLOR_WORK_ACTIVE if timer_running else COLOR_WORK_INACTIVE)
@@ -164,7 +174,7 @@ def run_tray():
             MenuItem("Выход", exit_app)
         )
     )
-    threading.Thread(target=tray_icon.run, daemon=True).start()
+    tray_icon.run_detached()
 
 # ================== UI ==================
 root = tk.Tk()
@@ -194,7 +204,12 @@ entry_break = tk.Entry(frame_settings, width=5)
 entry_break.insert(0, settings["break"])
 entry_break.grid(row=1, column=1)
 
-label_timer = tk.Label(root, text="00:00", font=("Arial", 24, "bold"), bg=COLOR_BG)
+label_timer = tk.Label(
+    root,
+    text="00:00",
+    font=("Arial", 24, "bold"),
+    bg=COLOR_BG
+)
 label_timer.pack(pady=5)
 
 frame_buttons = tk.Frame(root, bg=COLOR_BG)

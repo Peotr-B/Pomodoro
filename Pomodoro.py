@@ -1,234 +1,408 @@
 # -*- coding: utf-8 -*-
 """
-Created on Mon Dec 22 11:38:43 2025
+Created on Mon Dec 24 11:38:43 2025
 Pomodoro.py
-С использованием ChatGPT
+С использованием DeepSeek
 D:\ИИ\Нейросети\Программирование с нейросетью\Помодоро с нейросетью
 Scriptor
 @author: рс
 """
 
 import tkinter as tk
+from tkinter import font
 import time
-import json
-import os
 import winsound
 
-from pystray import Icon, Menu, MenuItem
-from PIL import Image, ImageDraw
-
-# ================== НАСТРОЙКИ ==================
-SETTINGS_FILE = "settings.json"
-
-DEFAULT_WORK_MIN = 25
-DEFAULT_BREAK_MIN = 5
-
-COLOR_BG = "#e6f4a3"
-
-COLOR_WORK_ACTIVE = "#ff9800"
-COLOR_WORK_INACTIVE = "#ffd8a8"
-
-COLOR_BREAK_ACTIVE = "#00bcd4"
-COLOR_BREAK_INACTIVE = "#b2ebf2"
-
-COLOR_STOP = "#8d6e63"
-COLOR_EXIT = "#e53935"
-
-# ================== СОСТОЯНИЕ ==================
-current_mode = None        # "work" / "break"
-timer_running = False
-remaining_seconds = 0
-after_id = None
-tray_icon = None
-
-# ================== НАСТРОЙКИ ==================
-def load_settings():
-    if os.path.exists(SETTINGS_FILE):
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"work": DEFAULT_WORK_MIN, "break": DEFAULT_BREAK_MIN}
-
-def save_settings():
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump({
-            "work": int(entry_work.get()),
-            "break": int(entry_break.get())
-        }, f)
-
-settings = load_settings()
-
-# ================== ТАЙМЕР ==================
-def start_timer():
-    global timer_running
-    if timer_running or remaining_seconds <= 0:
-        return
-    timer_running = True
-    update_mode_buttons()
-    schedule_tick()
-
-def schedule_tick():
-    global after_id
-    after_id = root.after(1000, tick)
-
-def tick():
-    global remaining_seconds, timer_running, after_id
-
-    if not timer_running:
-        return
-
-    if remaining_seconds > 0:
-        remaining_seconds -= 1
-        update_timer_label()
-        schedule_tick()
-    else:
-        timer_running = False
-        after_id = None
-        winsound.PlaySound("SystemHand", winsound.SND_ALIAS)
-        reset_to_default(current_mode)
-        update_mode_buttons()
-
-def pause_timer():
-    global timer_running, after_id
-    timer_running = False
-    if after_id:
-        root.after_cancel(after_id)
-        after_id = None
-    update_mode_buttons()
-
-def reset_to_default(mode):
-    global remaining_seconds
-    if mode == "work":
-        remaining_seconds = int(entry_work.get()) * 60
-    elif mode == "break":
-        remaining_seconds = int(entry_break.get()) * 60
-    update_timer_label()
-
-def update_timer_label():
-    m = remaining_seconds // 60
-    s = remaining_seconds % 60
-    label_timer.config(text=f"{m:02d}:{s:02d}")
-
-# ================== РЕЖИМЫ ==================
-def start_mode(mode):
-    global current_mode
-
-    if current_mode != mode:
-        pause_timer()
-        current_mode = mode
-        reset_to_default(mode)
-        start_timer()
-    else:
-        if not timer_running:
-            start_timer()
-
-def start_work():
-    start_mode("work")
-
-def start_break():
-    start_mode("break")
-
-# ================== ЦВЕТА ==================
-def update_mode_buttons():
-    if current_mode == "work":
-        btn_work.config(bg=COLOR_WORK_ACTIVE if timer_running else COLOR_WORK_INACTIVE)
-        btn_break.config(bg=COLOR_BREAK_INACTIVE)
-    elif current_mode == "break":
-        btn_break.config(bg=COLOR_BREAK_ACTIVE if timer_running else COLOR_BREAK_INACTIVE)
-        btn_work.config(bg=COLOR_WORK_INACTIVE)
-    else:
-        btn_work.config(bg=COLOR_WORK_INACTIVE)
-        btn_break.config(bg=COLOR_BREAK_INACTIVE)
-
-# ================== ТРЕЙ ==================
-def create_tray_image():
-    img = Image.new("RGB", (64, 64), "yellow")
-    d = ImageDraw.Draw(img)
-    d.ellipse((8, 8, 56, 56), fill="orange")
-    return img
-
-def hide_window():
-    root.withdraw()
-    run_tray()
-
-def show_window(icon=None, item=None):
-    root.after(0, root.deiconify)
-
-def exit_app(icon=None, item=None):
-    pause_timer()
-    save_settings()
-    if tray_icon:
-        tray_icon.stop()
-    root.destroy()
-
-def run_tray():
-    global tray_icon
-    if tray_icon:
-        return
-
-    tray_icon = Icon(
-        "Pomodoro",
-        create_tray_image(),
-        "Таймер помодоро",
-        menu=Menu(
-            MenuItem("Открыть", show_window, default=True),
-            MenuItem("Выход", exit_app)
+class PomodoroTimer:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Таймер помодоро – эффективность в работе")
+        self.root.geometry("450x450")
+        self.root.configure(bg='#C8FF96')  # жёлто-зелёный цвет
+        
+        # Настройки по умолчанию
+        self.work_time = 25 * 60  # 25 минут в секундах
+        self.break_time = 5 * 60  # 5 минут в секундах
+        self.current_time = self.work_time
+        self.is_work_mode = True
+        self.is_running = False
+        self.timer_id = None
+        
+        # Цвета
+        self.work_active_color = '#FFC864'      # ярко-оранжевый
+        self.work_inactive_color = '#FFEBC8'    # бледный оранжевый
+        self.break_active_color = '#64C8FF'     # ярко-голубой
+        self.break_inactive_color = '#C8EBFF'   # бледный голубой
+        self.work_bg_color = '#FFC896'          # оранжевый фон
+        self.break_bg_color = '#96C8FF'         # голубой фон
+        self.form_color = '#C8FF96'             # жёлто-зелёный
+        self.reset_button_color = '#E0E0E0'     # цвет кнопки сброса
+        
+        self.setup_ui()
+        self.update_display()
+    
+    def setup_ui(self):
+        # Заголовок
+        title_font = font.Font(family='Arial', size=16, weight='bold')
+        title_label = tk.Label(
+            self.root, 
+            text="ТАЙМЕР ПОМОДОРО",
+            font=title_font,
+            bg=self.form_color,
+            fg='black'
         )
-    )
-    tray_icon.run_detached()
+        title_label.pack(pady=20)
+        
+        # Фрейм для настроек времени
+        settings_frame = tk.Frame(self.root, bg=self.form_color)
+        settings_frame.pack(pady=10)
+        
+        # Поле для времени работы
+        work_label = tk.Label(
+            settings_frame,
+            text="Работа (минуты):",
+            font=('Arial', 10),
+            bg=self.form_color,
+            fg='black'
+        )
+        work_label.grid(row=0, column=0, padx=10, pady=5)
+        
+        self.work_entry = tk.Entry(
+            settings_frame,
+            width=10,
+            font=('Arial', 12),
+            bg=self.work_bg_color,
+            fg='black',
+            justify='center'
+        )
+        self.work_entry.insert(0, "25")
+        self.work_entry.grid(row=0, column=1, padx=10, pady=5)
+        
+        # Поле для времени перерыва
+        break_label = tk.Label(
+            settings_frame,
+            text="Перерыв (минуты):",
+            font=('Arial', 10),
+            bg=self.form_color,
+            fg='black'
+        )
+        break_label.grid(row=1, column=0, padx=10, pady=5)
+        
+        self.break_entry = tk.Entry(
+            settings_frame,
+            width=10,
+            font=('Arial', 12),
+            bg=self.break_bg_color,
+            fg='black',
+            justify='center'
+        )
+        self.break_entry.insert(0, "5")
+        self.break_entry.grid(row=1, column=1, padx=10, pady=5)
+        
+        # Отображение таймера
+        self.timer_font = font.Font(family='Arial', size=48, weight='bold')
+        self.timer_label = tk.Label(
+            self.root,
+            text="25:00",
+            font=self.timer_font,
+            bg=self.form_color,
+            fg='black'
+        )
+        self.timer_label.pack(pady=30)
+        
+        # Фрейм для кнопок управления
+        control_frame = tk.Frame(self.root, bg=self.form_color)
+        control_frame.pack(pady=10)
+        
+        # Кнопка "Работа"
+        self.work_button = tk.Button(
+            control_frame,
+            text="РАБОТА",
+            font=('Arial', 12, 'bold'),
+            width=12,
+            height=2,
+            bg=self.work_inactive_color,
+            fg='black',
+            command=self.work_button_click
+        )
+        self.work_button.grid(row=0, column=0, padx=5)
+        
+        # Кнопка "Перерыв"
+        self.break_button = tk.Button(
+            control_frame,
+            text="ПЕРЕРЫВ",
+            font=('Arial', 12, 'bold'),
+            width=12,
+            height=2,
+            bg=self.break_inactive_color,
+            fg='black',
+            command=self.break_button_click
+        )
+        self.break_button.grid(row=0, column=1, padx=5)
+        
+        # Фрейм для кнопки сброса
+        reset_frame = tk.Frame(self.root, bg=self.form_color)
+        reset_frame.pack(pady=10)
+        
+        # Кнопка "Сброс"
+        self.reset_button = tk.Button(
+            reset_frame,
+            text="СБРОС",
+            font=('Arial', 10, 'bold'),
+            width=10,
+            height=1,
+            bg=self.reset_button_color,
+            fg='black',
+            command=self.reset_timer
+        )
+        self.reset_button.pack()
+        
+        # Индикатор текущего режима
+        self.mode_label = tk.Label(
+            self.root,
+            text="Режим: РАБОТА",
+            font=('Arial', 10),
+            bg=self.form_color,
+            fg='black'
+        )
+        self.mode_label.pack(pady=5)
+    
+    def work_button_click(self):
+        """Обработчик клика по кнопке РАБОТА"""
+        if self.is_running:
+            # Если таймер запущен
+            if self.is_work_mode:
+                # Если уже в режиме работы - останавливаем
+                self.stop_timer()
+                self.work_button.config(bg=self.work_inactive_color)
+            else:
+                # Если в режиме перерыва - переключаемся на работу
+                self.switch_to_work()
+        else:
+            # Если таймер остановлен
+            if self.is_work_mode:
+                # Если уже в режиме работы - запускаем
+                self.start_work_mode()
+            else:
+                # Если в режиме перерыва - переключаемся на работу и запускаем
+                self.switch_to_work()
+    
+    def break_button_click(self):
+        """Обработчик клика по кнопке ПЕРЕРЫВ"""
+        if self.is_running:
+            # Если таймер запущен
+            if not self.is_work_mode:
+                # Если уже в режиме перерыва - останавливаем
+                self.stop_timer()
+                self.break_button.config(bg=self.break_inactive_color)
+            else:
+                # Если в режиме работы - переключаемся на перерыв
+                self.switch_to_break()
+        else:
+            # Если таймер остановлен
+            if not self.is_work_mode:
+                # Если уже в режиме перерыва - запускаем
+                self.start_break_mode()
+            else:
+                # Если в режиме работы - переключаемся на перерыв и запускаем
+                self.switch_to_break()
+    
+    def switch_to_work(self):
+        """Переключение в режим работы"""
+        # Останавливаем текущий таймер
+        self.stop_timer()
+        
+        # Устанавливаем время работы
+        try:
+            minutes = int(self.work_entry.get())
+            if minutes < 1:
+                minutes = 1
+            self.work_time = minutes * 60
+            self.current_time = self.work_time
+        except ValueError:
+            self.work_time = 25 * 60
+            self.current_time = self.work_time
+            self.work_entry.delete(0, tk.END)
+            self.work_entry.insert(0, "25")
+        
+        # Устанавливаем режим и запускаем
+        self.is_work_mode = True
+        self.start_timer()
+        
+        # Обновляем кнопки
+        self.work_button.config(bg=self.work_active_color)
+        self.break_button.config(bg=self.break_inactive_color)
+        self.mode_label.config(text="Режим: РАБОТА")
+    
+    def switch_to_break(self):
+        """Переключение в режим перерыва"""
+        # Останавливаем текущий таймер
+        self.stop_timer()
+        
+        # Устанавливаем время перерыва
+        try:
+            minutes = int(self.break_entry.get())
+            if minutes < 1:
+                minutes = 1
+            self.break_time = minutes * 60
+            self.current_time = self.break_time
+        except ValueError:
+            self.break_time = 5 * 60
+            self.current_time = self.break_time
+            self.break_entry.delete(0, tk.END)
+            self.break_entry.insert(0, "5")
+        
+        # Устанавливаем режим и запускаем
+        self.is_work_mode = False
+        self.start_timer()
+        
+        # Обновляем кнопки
+        self.break_button.config(bg=self.break_active_color)
+        self.work_button.config(bg=self.work_inactive_color)
+        self.mode_label.config(text="Режим: ПЕРЕРЫВ")
+    
+    def start_work_mode(self):
+        """Запуск режима работы (если уже в этом режиме)"""
+        # Обновляем время работы
+        try:
+            minutes = int(self.work_entry.get())
+            if minutes < 1:
+                minutes = 1
+            self.work_time = minutes * 60
+            self.current_time = self.work_time
+        except ValueError:
+            self.work_time = 25 * 60
+            self.current_time = self.work_time
+            self.work_entry.delete(0, tk.END)
+            self.work_entry.insert(0, "25")
+        
+        # Устанавливаем режим
+        self.is_work_mode = True
+        self.start_timer()
+        
+        # Обновляем кнопки
+        self.work_button.config(bg=self.work_active_color)
+        self.break_button.config(bg=self.break_inactive_color)
+        self.mode_label.config(text="Режим: РАБОТА")
+    
+    def start_break_mode(self):
+        """Запуск режима перерыва (если уже в этом режиме)"""
+        # Обновляем время перерыва
+        try:
+            minutes = int(self.break_entry.get())
+            if minutes < 1:
+                minutes = 1
+            self.break_time = minutes * 60
+            self.current_time = self.break_time
+        except ValueError:
+            self.break_time = 5 * 60
+            self.current_time = self.break_time
+            self.break_entry.delete(0, tk.END)
+            self.break_entry.insert(0, "5")
+        
+        # Устанавливаем режим
+        self.is_work_mode = False
+        self.start_timer()
+        
+        # Обновляем кнопки
+        self.break_button.config(bg=self.break_active_color)
+        self.work_button.config(bg=self.work_inactive_color)
+        self.mode_label.config(text="Режим: ПЕРЕРЫВ")
+    
+    def start_timer(self):
+        """Запуск таймера"""
+        if not self.is_running:
+            self.is_running = True
+            self.update_timer()
+    
+    def stop_timer(self):
+        """Остановка таймера"""
+        self.is_running = False
+        if self.timer_id:
+            self.root.after_cancel(self.timer_id)
+            self.timer_id = None
+    
+    def update_timer(self):
+        """Обновление таймера"""
+        if not self.is_running:
+            return
+        
+        self.current_time -= 1
+        
+        if self.current_time <= 0:
+            self.stop_timer()
+            # Воспроизводим звуковой сигнал
+            winsound.Beep(1000, 1000)
+            
+            # Сбрасываем цвета кнопок
+            self.work_button.config(bg=self.work_inactive_color)
+            self.break_button.config(bg=self.break_inactive_color)
+            
+            # Обновляем индикатор режима
+            if self.is_work_mode:
+                self.mode_label.config(text="Работа завершена!")
+            else:
+                self.mode_label.config(text="Перерыв завершён!")
+            
+            # Возвращаем значения по умолчанию
+            if self.is_work_mode:
+                self.current_time = self.work_time
+            else:
+                self.current_time = self.break_time
+        
+        self.update_display()
+        
+        if self.is_running:
+            # Запланировать следующее обновление через 1 секунду
+            self.timer_id = self.root.after(1000, self.update_timer)
+    
+    def update_display(self):
+        """Обновление отображения таймера"""
+        minutes = self.current_time // 60
+        seconds = self.current_time % 60
+        self.timer_label.config(text=f"{minutes:02d}:{seconds:02d}")
+    
+    def reset_timer(self):
+        """Сброс таймера"""
+        self.stop_timer()
+        
+        # Восстанавливаем значения по умолчанию из полей ввода
+        try:
+            work_minutes = int(self.work_entry.get())
+            if work_minutes < 1:
+                work_minutes = 1
+            self.work_time = work_minutes * 60
+        except ValueError:
+            self.work_time = 25 * 60
+            self.work_entry.delete(0, tk.END)
+            self.work_entry.insert(0, "25")
+        
+        try:
+            break_minutes = int(self.break_entry.get())
+            if break_minutes < 1:
+                break_minutes = 1
+            self.break_time = break_minutes * 60
+        except ValueError:
+            self.break_time = 5 * 60
+            self.break_entry.delete(0, tk.END)
+            self.break_entry.insert(0, "5")
+        
+        # Устанавливаем режим работы
+        self.is_work_mode = True
+        self.current_time = self.work_time
+        
+        # Сбрасываем кнопки
+        self.work_button.config(bg=self.work_inactive_color)
+        self.break_button.config(bg=self.break_inactive_color)
+        self.mode_label.config(text="Режим: РАБОТА")
+        
+        # Обновляем отображение
+        self.update_display()
 
-# ================== UI ==================
-root = tk.Tk()
-root.title("Таймер помодоро")
-root.geometry("300x225")
-root.configure(bg=COLOR_BG)
-root.protocol("WM_DELETE_WINDOW", hide_window)
+def main():
+    root = tk.Tk()
+    app = PomodoroTimer(root)
+    root.mainloop()
 
-tk.Label(
-    root,
-    text="Таймер помодоро\nэффективность в работе",
-    font=("Arial", 14, "bold"),
-    bg=COLOR_BG,
-    justify="center"
-).pack(pady=5)
-
-frame_settings = tk.Frame(root, bg=COLOR_BG)
-frame_settings.pack()
-
-tk.Label(frame_settings, text="Работа (мин)", bg=COLOR_BG).grid(row=0, column=0)
-entry_work = tk.Entry(frame_settings, width=5)
-entry_work.insert(0, settings["work"])
-entry_work.grid(row=0, column=1)
-
-tk.Label(frame_settings, text="Перерыв (мин)", bg=COLOR_BG).grid(row=1, column=0)
-entry_break = tk.Entry(frame_settings, width=5)
-entry_break.insert(0, settings["break"])
-entry_break.grid(row=1, column=1)
-
-label_timer = tk.Label(
-    root,
-    text="00:00",
-    font=("Arial", 24, "bold"),
-    bg=COLOR_BG
-)
-label_timer.pack(pady=5)
-
-frame_buttons = tk.Frame(root, bg=COLOR_BG)
-frame_buttons.pack()
-
-btn_work = tk.Button(frame_buttons, text="Работа", width=8, command=start_work)
-btn_work.grid(row=0, column=0, padx=3)
-
-btn_break = tk.Button(frame_buttons, text="Перерыв", width=8, command=start_break)
-btn_break.grid(row=0, column=1, padx=3)
-
-btn_stop = tk.Button(frame_buttons, text="Останов", bg=COLOR_STOP, width=8, command=pause_timer)
-btn_stop.grid(row=1, column=0, pady=3)
-
-btn_exit = tk.Button(frame_buttons, text="Выход", bg=COLOR_EXIT, width=8, command=exit_app)
-btn_exit.grid(row=1, column=1, pady=3)
-
-current_mode = "work"
-reset_to_default("work")
-update_mode_buttons()
-
-root.mainloop()
+if __name__ == "__main__":
+    main()
