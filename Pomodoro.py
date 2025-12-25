@@ -3,7 +3,11 @@
 Created on Mon Dec 22 11:38:43 2025
 <<<<<<< Updated upstream
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 Pomodoro.py
+=======
+pomodoro_circle.py
+>>>>>>> Stashed changes
 =======
 pomodoro_circle.py
 >>>>>>> Stashed changes
@@ -23,6 +27,7 @@ pomodoro_circle.py
 """
 
 import tkinter as tk
+<<<<<<< Updated upstream
 <<<<<<< Updated upstream
 <<<<<<< Updated upstream
 from tkinter import ttk
@@ -254,6 +259,8 @@ setup_tray()
 =======
 =======
 >>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
 import sys
 import json
 from pathlib import Path
@@ -478,6 +485,9 @@ update_timer_label()
 
 root.protocol("WM_DELETE_WINDOW", quit_app)
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
 =======
 >>>>>>> Stashed changes
