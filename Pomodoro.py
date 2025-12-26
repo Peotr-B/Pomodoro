@@ -41,6 +41,8 @@ break_minutes = DEFAULT_BREAK
 time_left = 0           # в секундах
 timer_after_id = None   # ВАЖНО: id after()
 
+paused = False
+
 # -------------------- загрузка / сохранение --------------------
 
 def load_settings():
@@ -87,35 +89,39 @@ def tick():
 # -------------------- логика режимов --------------------
 
 def start_work():
-    global mode, running, time_left, work_minutes
+    global mode, running, time_left, paused
 
     stop_timer()
+
+    if mode != "work":
+        time_left = work_minutes * 60
+
     mode = "work"
     running = True
-
-    if time_left <= 0 or previous_mode != "work":
-        time_left = work_minutes * 60
+    paused = False
 
     update_ui()
     tick()
 
 def start_break():
-    global mode, running, time_left, break_minutes
+    global mode, running, time_left, paused
 
     stop_timer()
+
+    if mode != "break":
+        time_left = break_minutes * 60
+
     mode = "break"
     running = True
-
-    if time_left <= 0 or previous_mode != "break":
-        time_left = break_minutes * 60
+    paused = False
 
     update_ui()
     tick()
 
 def stop_mode():
-    global mode
+    global mode, paused
     stop_timer()
-    mode = "stop"
+    paused = True
     update_ui()
 
 def quit_app():
@@ -165,9 +171,20 @@ def set_break():
 # -------------------- GUI --------------------
 
 root = tk.Tk()
+#root.overrideredirect(True)  #Для скрытия окна
 root.title("Помодоро")
-root.geometry("260x340")
+#root.geometry("260x340")
+#root.geometry("300x300")
+#root.geometry("280x280")
+root.geometry("240x210")
 root.resizable(False, False)
+
+"""root = tk.Tk()
+root.title("Помодоро")
+root.geometry("280x280")
+root.resizable(False, False)
+root.overrideredirect(True)
+"""
 
 load_settings()
 
@@ -190,13 +207,21 @@ def play_end_sound():
     # "Биг-Бен" — низкий, затем высокий тон
     winsound.Beep(523, 400)   # До
     winsound.Beep(659, 400)   # Ми
+""" 
+def minimize_to_tray():
+    root.withdraw()   # скрываем окно
+"""
+ 
+def on_close():
+    root.iconify()   # сворачивает в панель задач
 
 # -------------------- layout --------------------
 
-tk.Label(root, text="Помодоро", font=("Arial", 14, "bold")).pack(pady=5)
+#tk.Label(root, text="Помодоро", font=("Arial", 14, "bold")).pack(pady=5)
 
 timer_label = tk.Label(root, text="00:00", font=("Arial", 32))
-timer_label.pack(pady=10)
+#timer_label.pack(pady=10)
+timer_label.pack(pady=5)
 
 frame_settings = tk.Frame(root)
 frame_settings.pack(pady=5)
@@ -214,7 +239,8 @@ break_entry.grid(row=1, column=1)
 tk.Button(frame_settings, text="OK", command=set_break).grid(row=1, column=2)
 
 frame_buttons = tk.Frame(root)
-frame_buttons.pack(pady=15)
+#frame_buttons.pack(pady=15)
+frame_buttons.pack(pady=8)
 
 work_btn = tk.Button(frame_buttons, text="Работа", width=10, command=wrapped_start_work)
 work_btn.grid(row=0, column=0, padx=5)
@@ -225,11 +251,15 @@ stop_btn.grid(row=0, column=1, padx=5)
 break_btn = tk.Button(frame_buttons, text="Перерыв", width=10, command=wrapped_start_break)
 break_btn.grid(row=1, column=0, padx=5, pady=5)
 
-exit_btn = tk.Button(frame_buttons, text="Выход", width=10, bg=COLOR_EXIT, fg="white", command=quit_app)
+exit_btn = tk.Button(
+    frame_buttons,
+    text="Выход",
+    command=quit_app
+)
 exit_btn.grid(row=1, column=1, padx=5, pady=5)
 
 update_ui()
 update_timer_label()
 
-root.protocol("WM_DELETE_WINDOW", quit_app)
+root.protocol("WM_DELETE_WINDOW", on_close)
 root.mainloop()
