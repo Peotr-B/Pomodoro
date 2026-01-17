@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Created on Mon Dec 22 11:38:43 2025
-Pomodoro.py
+pomodoro_circle.py
 С использованием ChatGPT
 D:\ИИ\Нейросети\Программирование с нейросетью\Помодоро с нейросетью
 Scriptor
@@ -9,226 +9,257 @@ Scriptor
 """
 
 import tkinter as tk
-import time
+import sys
 import json
-import os
+from pathlib import Path
 import winsound
 
-from pystray import Icon, Menu, MenuItem
-from PIL import Image, ImageDraw
 
-# ================== НАСТРОЙКИ ==================
-SETTINGS_FILE = "settings.json"
+# -------------------- настройки --------------------
 
-DEFAULT_WORK_MIN = 25
-DEFAULT_BREAK_MIN = 5
+SETTINGS_FILE = Path("pomodoro_settings.json")
 
-COLOR_BG = "#e6f4a3"
+DEFAULT_WORK = 25
+DEFAULT_BREAK = 5
 
+COLOR_BG_STOP = "#eeeeee"
 COLOR_WORK_ACTIVE = "#ff9800"
-COLOR_WORK_INACTIVE = "#ffd8a8"
-
-COLOR_BREAK_ACTIVE = "#00bcd4"
-COLOR_BREAK_INACTIVE = "#b2ebf2"
-
+COLOR_WORK_IDLE = "#ffd6a0"
+COLOR_BREAK_ACTIVE = "#4fc3f7"
+COLOR_BREAK_IDLE = "#cfefff"
 COLOR_STOP = "#8d6e63"
 COLOR_EXIT = "#e53935"
 
-# ================== СОСТОЯНИЕ ==================
-current_mode = None        # "work" / "break"
-timer_running = False
-remaining_seconds = 0
-after_id = None
-tray_icon = None
+# -------------------- состояние --------------------
 
-# ================== НАСТРОЙКИ ==================
+mode = "stop"          # work / break / stop
+running = False
+
+work_minutes = DEFAULT_WORK
+break_minutes = DEFAULT_BREAK
+
+time_left = 0           # в секундах
+timer_after_id = None   # ВАЖНО: id after()
+
+paused = False
+
+# -------------------- загрузка / сохранение --------------------
+
 def load_settings():
-    if os.path.exists(SETTINGS_FILE):
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"work": DEFAULT_WORK_MIN, "break": DEFAULT_BREAK_MIN}
+    global work_minutes, break_minutes
+    if SETTINGS_FILE.exists():
+        try:
+            data = json.loads(SETTINGS_FILE.read_text())
+            work_minutes = int(data.get("work", DEFAULT_WORK))
+            break_minutes = int(data.get("break", DEFAULT_BREAK))
+        except:
+            pass
 
 def save_settings():
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump({
-            "work": int(entry_work.get()),
-            "break": int(entry_break.get())
-        }, f)
+    SETTINGS_FILE.write_text(json.dumps({
+        "work": work_minutes,
+        "break": break_minutes
+    }))
 
-settings = load_settings()
+# -------------------- after-ядро --------------------
 
-# ================== ТАЙМЕР ==================
-def start_timer():
-    global timer_running
-    if timer_running or remaining_seconds <= 0:
-        return
-    timer_running = True
-    update_mode_buttons()
-    schedule_tick()
-
-def schedule_tick():
-    global after_id
-    after_id = root.after(1000, tick)
+def stop_timer():
+    """Полная остановка таймера"""
+    global running, timer_after_id
+    running = False
+    if timer_after_id is not None:
+        root.after_cancel(timer_after_id)
+        timer_after_id = None
 
 def tick():
-    global remaining_seconds, timer_running, after_id
+    """Единственный цикл таймера"""
+    global time_left, timer_after_id
 
-    if not timer_running:
+    if not running:
         return
 
-    if remaining_seconds > 0:
-        remaining_seconds -= 1
+    if time_left > 0:
+        time_left -= 1
         update_timer_label()
-        schedule_tick()
+        timer_after_id = root.after(1000, tick)
     else:
-        timer_running = False
-        after_id = None
-        winsound.PlaySound("SystemHand", winsound.SND_ALIAS)
-        reset_to_default(current_mode)
-        update_mode_buttons()
+        play_end_sound()
+        stop_timer()
 
-def pause_timer():
-    global timer_running, after_id
-    timer_running = False
-    if after_id:
-        root.after_cancel(after_id)
-        after_id = None
-    update_mode_buttons()
-
-def reset_to_default(mode):
-    global remaining_seconds
-    if mode == "work":
-        remaining_seconds = int(entry_work.get()) * 60
-    elif mode == "break":
-        remaining_seconds = int(entry_break.get()) * 60
-    update_timer_label()
-
-def update_timer_label():
-    m = remaining_seconds // 60
-    s = remaining_seconds % 60
-    label_timer.config(text=f"{m:02d}:{s:02d}")
-
-# ================== РЕЖИМЫ ==================
-def start_mode(mode):
-    global current_mode
-
-    if current_mode != mode:
-        pause_timer()
-        current_mode = mode
-        reset_to_default(mode)
-        start_timer()
-    else:
-        if not timer_running:
-            start_timer()
+# -------------------- логика режимов --------------------
 
 def start_work():
-    start_mode("work")
+    global mode, running, time_left, paused
+
+    stop_timer()
+
+    if mode != "work":
+        time_left = work_minutes * 60
+
+    mode = "work"
+    running = True
+    paused = False
+
+    update_ui()
+    tick()
 
 def start_break():
-    start_mode("break")
+    global mode, running, time_left, paused
 
-# ================== ЦВЕТА ==================
-def update_mode_buttons():
-    if current_mode == "work":
-        btn_work.config(bg=COLOR_WORK_ACTIVE if timer_running else COLOR_WORK_INACTIVE)
-        btn_break.config(bg=COLOR_BREAK_INACTIVE)
-    elif current_mode == "break":
-        btn_break.config(bg=COLOR_BREAK_ACTIVE if timer_running else COLOR_BREAK_INACTIVE)
-        btn_work.config(bg=COLOR_WORK_INACTIVE)
-    else:
-        btn_work.config(bg=COLOR_WORK_INACTIVE)
-        btn_break.config(bg=COLOR_BREAK_INACTIVE)
+    stop_timer()
 
-# ================== ТРЕЙ ==================
-def create_tray_image():
-    img = Image.new("RGB", (64, 64), "yellow")
-    d = ImageDraw.Draw(img)
-    d.ellipse((8, 8, 56, 56), fill="orange")
-    return img
+    if mode != "break":
+        time_left = break_minutes * 60
 
-def hide_window():
-    root.withdraw()
-    run_tray()
+    mode = "break"
+    running = True
+    paused = False
 
-def show_window(icon=None, item=None):
-    root.after(0, root.deiconify)
+    update_ui()
+    tick()
 
-def exit_app(icon=None, item=None):
-    pause_timer()
+def stop_mode():
+    global mode, paused
+    stop_timer()
+    paused = True
+    update_ui()
+
+def quit_app():
+    stop_timer()
     save_settings()
-    if tray_icon:
-        tray_icon.stop()
     root.destroy()
+    sys.exit(0)
 
-def run_tray():
-    global tray_icon
-    if tray_icon:
-        return
+# -------------------- UI --------------------
 
-    tray_icon = Icon(
-        "Pomodoro",
-        create_tray_image(),
-        "Таймер помодоро",
-        menu=Menu(
-            MenuItem("Открыть", show_window, default=True),
-            MenuItem("Выход", exit_app)
-        )
-    )
-    tray_icon.run_detached()
+def update_timer_label():
+    m = time_left // 60
+    s = time_left % 60
+    timer_label.config(text=f"{m:02}:{s:02}")
 
-# ================== UI ==================
+def update_ui():
+    root.config(bg=COLOR_BG_STOP)
+
+    work_btn.config(bg=COLOR_WORK_IDLE)
+    break_btn.config(bg=COLOR_BREAK_IDLE)
+
+    if mode == "work":
+        root.config(bg=COLOR_WORK_IDLE)
+        work_btn.config(bg=COLOR_WORK_ACTIVE)
+    elif mode == "break":
+        root.config(bg=COLOR_BREAK_IDLE)
+        break_btn.config(bg=COLOR_BREAK_ACTIVE)
+
+# -------------------- callbacks значений --------------------
+
+def set_work():
+    global work_minutes
+    try:
+        work_minutes = int(work_entry.get())
+        save_settings()
+    except:
+        pass
+
+def set_break():
+    global break_minutes
+    try:
+        break_minutes = int(break_entry.get())
+        save_settings()
+    except:
+        pass
+
+# -------------------- GUI --------------------
+
 root = tk.Tk()
-root.title("Таймер помодоро")
-root.geometry("300x225")
-root.configure(bg=COLOR_BG)
-root.protocol("WM_DELETE_WINDOW", hide_window)
+#root.overrideredirect(True)  #Для скрытия окна
+root.title("Помодоро")
+#root.geometry("260x340")
+#root.geometry("300x300")
+#root.geometry("280x280")
+root.geometry("240x210")
+root.resizable(False, False)
 
-tk.Label(
-    root,
-    text="Таймер помодоро\nэффективность в работе",
-    font=("Arial", 14, "bold"),
-    bg=COLOR_BG,
-    justify="center"
-).pack(pady=5)
+"""root = tk.Tk()
+root.title("Помодоро")
+root.geometry("280x280")
+root.resizable(False, False)
+root.overrideredirect(True)
+"""
 
-frame_settings = tk.Frame(root, bg=COLOR_BG)
-frame_settings.pack()
+load_settings()
 
-tk.Label(frame_settings, text="Работа (мин)", bg=COLOR_BG).grid(row=0, column=0)
-entry_work = tk.Entry(frame_settings, width=5)
-entry_work.insert(0, settings["work"])
-entry_work.grid(row=0, column=1)
+previous_mode = "stop"
 
-tk.Label(frame_settings, text="Перерыв (мин)", bg=COLOR_BG).grid(row=1, column=0)
-entry_break = tk.Entry(frame_settings, width=5)
-entry_break.insert(0, settings["break"])
-entry_break.grid(row=1, column=1)
+def remember_mode(new_mode):
+    global previous_mode
+    previous_mode = mode
 
-label_timer = tk.Label(
-    root,
-    text="00:00",
-    font=("Arial", 24, "bold"),
-    bg=COLOR_BG
+# intercept
+def wrapped_start_work():
+    remember_mode("work")
+    start_work()
+
+def wrapped_start_break():
+    remember_mode("break")
+    start_break()
+
+def play_end_sound():
+    # "Биг-Бен" — низкий, затем высокий тон
+    winsound.Beep(523, 400)   # До
+    winsound.Beep(659, 400)   # Ми
+""" 
+def minimize_to_tray():
+    root.withdraw()   # скрываем окно
+"""
+ 
+def on_close():
+    root.iconify()   # сворачивает в панель задач
+
+# -------------------- layout --------------------
+
+#tk.Label(root, text="Помодоро", font=("Arial", 14, "bold")).pack(pady=5)
+
+timer_label = tk.Label(root, text="00:00", font=("Arial", 32))
+#timer_label.pack(pady=10)
+timer_label.pack(pady=5)
+
+frame_settings = tk.Frame(root)
+frame_settings.pack(pady=5)
+
+tk.Label(frame_settings, text="Работа (мин)").grid(row=0, column=0)
+work_entry = tk.Entry(frame_settings, width=5)
+work_entry.insert(0, str(work_minutes))
+work_entry.grid(row=0, column=1)
+tk.Button(frame_settings, text="OK", command=set_work).grid(row=0, column=2)
+
+tk.Label(frame_settings, text="Перерыв (мин)").grid(row=1, column=0)
+break_entry = tk.Entry(frame_settings, width=5)
+break_entry.insert(0, str(break_minutes))
+break_entry.grid(row=1, column=1)
+tk.Button(frame_settings, text="OK", command=set_break).grid(row=1, column=2)
+
+frame_buttons = tk.Frame(root)
+#frame_buttons.pack(pady=15)
+frame_buttons.pack(pady=8)
+
+work_btn = tk.Button(frame_buttons, text="Работа", width=10, command=wrapped_start_work)
+work_btn.grid(row=0, column=0, padx=5)
+
+stop_btn = tk.Button(frame_buttons, text="Останов", width=10, bg=COLOR_STOP, command=stop_mode)
+stop_btn.grid(row=0, column=1, padx=5)
+
+break_btn = tk.Button(frame_buttons, text="Перерыв", width=10, command=wrapped_start_break)
+break_btn.grid(row=1, column=0, padx=5, pady=5)
+
+exit_btn = tk.Button(
+    frame_buttons,
+    text="Выход",
+    command=quit_app
 )
-label_timer.pack(pady=5)
+exit_btn.grid(row=1, column=1, padx=5, pady=5)
 
-frame_buttons = tk.Frame(root, bg=COLOR_BG)
-frame_buttons.pack()
+update_ui()
+update_timer_label()
 
-btn_work = tk.Button(frame_buttons, text="Работа", width=8, command=start_work)
-btn_work.grid(row=0, column=0, padx=3)
-
-btn_break = tk.Button(frame_buttons, text="Перерыв", width=8, command=start_break)
-btn_break.grid(row=0, column=1, padx=3)
-
-btn_stop = tk.Button(frame_buttons, text="Останов", bg=COLOR_STOP, width=8, command=pause_timer)
-btn_stop.grid(row=1, column=0, pady=3)
-
-btn_exit = tk.Button(frame_buttons, text="Выход", bg=COLOR_EXIT, width=8, command=exit_app)
-btn_exit.grid(row=1, column=1, pady=3)
-
-current_mode = "work"
-reset_to_default("work")
-update_mode_buttons()
-
+root.protocol("WM_DELETE_WINDOW", on_close)
 root.mainloop()
